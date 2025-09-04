@@ -1,0 +1,10 @@
+name: napari-slice-propagator
+display_name: Slice Propagator
+contributions:
+  commands:
+    - id: napari-slice-propagator.widget
+      python_name: napari_slice_propagator._widget:SlicePropagatorWidget
+      title: Slice Propagator Widget
+  widgets:
+    - command: napari-slice-propagator.widget
+      display_name: Slice Propagator

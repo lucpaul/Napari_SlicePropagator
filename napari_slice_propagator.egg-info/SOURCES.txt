@@ -1,0 +1,13 @@
+README.md
+setup.cfg
+setup.py
+napari_slice_propagator/__init__.py
+napari_slice_propagator/_propagator.py
+napari_slice_propagator/_widget.py
+napari_slice_propagator/napari.yaml
+napari_slice_propagator.egg-info/PKG-INFO
+napari_slice_propagator.egg-info/SOURCES.txt
+napari_slice_propagator.egg-info/dependency_links.txt
+napari_slice_propagator.egg-info/entry_points.txt
+napari_slice_propagator.egg-info/requires.txt
+napari_slice_propagator.egg-info/top_level.txt

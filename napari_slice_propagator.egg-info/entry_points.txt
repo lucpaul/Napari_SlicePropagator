@@ -1,0 +1,2 @@
+[napari.manifest]
+napari-slice-propagator = napari_slice_propagator:napari.yaml
