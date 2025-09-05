@@ -3,8 +3,9 @@ Core functionality for slice propagation and active contour segmentation.
 """
 
 import numpy as np
-from skimage import segmentation, measure, morphology, filters
+from skimage import segmentation, measure, morphology, filters, feature
 from skimage.segmentation import active_contour, morphological_chan_vese, find_boundaries
+import cv2  # or use skimage.registration.optical_flow_tvl1
 from scipy import ndimage
 from typing import Tuple, Optional, Dict, Any, Set, List
 import warnings
@@ -195,56 +196,6 @@ class SlicePropagator:
                 labels_to_propagate.add(source_label)
         
         return labels_to_propagate
-
-
-    # def get_new_labels_to_propagate(self, from_slice_idx: int, to_slice_idx: int, 
-    #                                labels_layer_data: np.ndarray, overlap_threshold: float = 0.1) -> Set[int]:
-    #     """
-    #     Get labels from source slice that are not already present on target slice.
-    #     Lower overlap threshold to allow propagation to slices with existing labels.
-    #     """
-    #     source_labels = labels_layer_data[from_slice_idx]
-    #     target_labels = labels_layer_data[to_slice_idx]
-        
-    #     # Get all labels from source
-    #     source_unique = set(np.unique(source_labels))
-    #     source_unique.discard(0)
-        
-    #     # Get existing labels on target
-    #     target_unique = set(np.unique(target_labels))
-    #     target_unique.discard(0)
-        
-    #     if not source_unique:
-    #         return set()
-        
-    #     # For incremental propagation, check which source regions
-    #     # don't have significant overlap with existing target regions
-    #     labels_to_propagate = set()
-        
-    #     for source_label in source_unique:
-    #         source_mask = (source_labels == source_label)
-            
-    #         # Check if this region overlaps significantly with any existing target region
-    #         has_significant_overlap = False
-    #         if target_unique:
-    #             overlap_check = target_labels[source_mask]
-    #             unique_overlaps = set(np.unique(overlap_check))
-    #             unique_overlaps.discard(0)
-                
-    #             # Calculate overlap ratio - use lower threshold for better propagation
-    #             if unique_overlaps:
-    #                 total_source_pixels = np.sum(source_mask)
-    #                 overlapping_pixels = np.sum(overlap_check > 0)
-    #                 overlap_ratio = overlapping_pixels / total_source_pixels if total_source_pixels > 0 else 0
-                    
-    #                 # Use lower overlap threshold to allow more propagation
-    #                 if overlap_ratio > overlap_threshold:
-    #                     has_significant_overlap = True
-            
-    #         if not has_significant_overlap:
-    #             labels_to_propagate.add(source_label)
-        
-    #     return labels_to_propagate
     
     def incremental_propagate(self, from_slice_idx: int, to_slice_idx: int, 
                             labels_layer_data: np.ndarray, apply_postprocessing: bool = True) -> np.ndarray:
@@ -289,11 +240,27 @@ class SlicePropagator:
             new_auto_labels.add(next_label_id)
             next_label_id += 1
         
-        # Apply the mapping to propagate new labels
-        target_slice = updated_data[to_slice_idx].copy()
-        for old_label, new_label in label_mapping.items():
-            source_mask = (source_labels == old_label)
-            target_slice[source_mask] = new_label
+        # Apply optical flow warping if image data is available
+        if hasattr(self, '_current_image_data') and self._current_image_data is not None:
+            # Apply optical flow to warp the labels
+            warped_labels = self._apply_optical_flow_warping(
+                self._current_image_data[from_slice_idx],
+                self._current_image_data[to_slice_idx], 
+                source_labels,
+                labels_to_propagate
+            )
+            
+            # Apply the label mapping to warped labels
+            target_slice = updated_data[to_slice_idx].copy()
+            for old_label, new_label in label_mapping.items():
+                warped_mask = (warped_labels == old_label)
+                target_slice[warped_mask] = new_label
+        else:
+            # Fallback to direct copying (original behavior)
+            target_slice = updated_data[to_slice_idx].copy()
+            for old_label, new_label in label_mapping.items():
+                source_mask = (source_labels == old_label)
+                target_slice[source_mask] = new_label
         
         # Update the data
         updated_data[to_slice_idx] = target_slice
@@ -387,22 +354,7 @@ class SlicePropagator:
 
                     # Update snapshot
                     self.slice_snapshots[target_slice] = refined_labels.copy()
-            # # Propagate from source slice to this target slice
-            # updated_data = self.incremental_propagate(source_slice, target_slice, updated_data)
-    
-            # # Apply refinement if requested
-            # if apply_refinement and image_data is not None:
-            #     target_labels = updated_data[target_slice]
-            #     if self.has_annotations(target_labels):
-            #         refined_labels = self.apply_refinement_method(
-            #             image_data[target_slice], target_labels, 
-            #             refinement_method, refinement_params
-            #         )
-            #         updated_data[target_slice] = refined_labels
-            
-            #         # Update snapshot
-            #         self.slice_snapshots[target_slice] = refined_labels.copy()
-        
+
         return updated_data
     
 
@@ -557,70 +509,6 @@ class SlicePropagator:
                         merged_labels.add(label2)
         
         return result
-
-
-
-    # def merge_overlapping_labels_within_slice(self, labels_slice: np.ndarray, 
-    #                                         overlap_threshold: float = 0.5) -> np.ndarray:
-    #     """
-    #     Merge overlapping labels within a single slice.
-        
-    #     Parameters:
-    #     -----------
-    #     labels_slice : np.ndarray
-    #         2D labeled image
-    #     overlap_threshold : float
-    #         Minimum overlap ratio to trigger merging
-            
-    #     Returns:
-    #     --------
-    #     np.ndarray
-    #         Modified slice with merged labels
-    #     """
-    #     if not self.has_annotations(labels_slice):
-    #         return labels_slice
-        
-    #     result = labels_slice.copy()
-    #     unique_labels = np.unique(labels_slice)
-    #     unique_labels = unique_labels[unique_labels > 0]
-        
-    #     if len(unique_labels) < 2:
-    #         return result
-        
-    #     # Track which labels have been merged
-    #     merged_labels = set()
-        
-    #     for i, label1 in enumerate(unique_labels):
-    #         if label1 in merged_labels:
-    #             continue
-                
-    #         mask1 = (labels_slice == label1)
-    #         label1_size = np.sum(mask1)
-            
-    #         for j, label2 in enumerate(unique_labels[i+1:], i+1):
-    #             if label2 in merged_labels:
-    #                 continue
-                    
-    #             mask2 = (labels_slice == label2)
-    #             label2_size = np.sum(mask2)
-                
-    #             # Calculate intersection
-    #             intersection = np.sum(mask1 & mask2)
-                
-    #             if intersection > 0:
-    #                 # Calculate overlap as intersection / smaller region
-    #                 smaller_size = min(label1_size, label2_size)
-    #                 overlap_ratio = intersection / smaller_size
-                    
-    #                 if overlap_ratio >= overlap_threshold:
-    #                     # Merge label2 into label1
-    #                     result[mask2] = label1
-    #                     merged_labels.add(label2)
-    #                     # Update mask1 to include merged region for subsequent comparisons
-    #                     mask1 = (result == label1)
-    #                     label1_size = np.sum(mask1)
-        
-    #     return result
     
     def merge_labels_across_slices(self, labels_layer_data: np.ndarray, 
                                   similarity_threshold: float = 0.7) -> np.ndarray:
@@ -942,7 +830,7 @@ class SlicePropagator:
                 rr, cc = polygon(contour_int[:, 0], contour_int[:, 1], image.shape)
                 mask[rr, cc] = True
                 
-                # Apply erosion with kernel size 2 for snake
+                # Apply erosion with kernel size 1 for snake
                 from skimage.morphology import binary_erosion, disk
                 eroded_mask = binary_erosion(mask, disk(2))
                 
@@ -1051,6 +939,86 @@ class SlicePropagator:
         except Exception as e:
             warnings.warn(f"Chan-Vese active contour failed: {e}")
             return initial_contour
+
+    def _apply_optical_flow_warping(self, source_image: np.ndarray, target_image: np.ndarray, 
+                                    source_labels: np.ndarray, labels_to_propagate: Set[int]) -> np.ndarray:
+        """
+        Apply optical flow to warp labels from source to target slice.
+        Efficiently computes flow only in regions around labels.
+        """
+        warped_labels = np.zeros_like(source_labels)
+        
+        # Process each label separately for efficiency
+        for label_id in labels_to_propagate:
+            source_mask = (source_labels == label_id)
+            
+            if not np.any(source_mask):
+                continue
+                
+            # Get bounding box around this label with padding for context
+            y_coords, x_coords = np.where(source_mask)
+            padding = 20  # pixels of context around the object
+            
+            y_min = max(0, y_coords.min() - padding)
+            y_max = min(source_image.shape[0], y_coords.max() + padding + 1)
+            x_min = max(0, x_coords.min() - padding)
+            x_max = min(source_image.shape[1], x_coords.max() + padding + 1)
+            
+            # Extract image patches
+            source_patch = source_image[y_min:y_max, x_min:x_max]
+            target_patch = target_image[y_min:y_max, x_min:x_max]
+            
+            if source_patch.size == 0 or target_patch.size == 0:
+                continue
+                
+            # Compute dense optical flow for this region
+            try:
+                # Use Farneback dense optical flow (correct function)
+                flow = cv2.calcOpticalFlowPyrLK(
+                    source_patch.astype(np.uint8),
+                    target_patch.astype(np.uint8),
+                    None,  # This should be None for dense flow
+                    winSize=(15, 15),
+                    maxLevel=2,
+                    criteria=(cv2.TERM_CRITERIA_EPS | cv2.TERM_CRITERIA_COUNT, 10, 0.03)
+                )
+                
+                # Actually, let's use the correct dense flow function:
+                flow = cv2.calcOpticalFlowFarneback(
+                    source_patch.astype(np.uint8),
+                    target_patch.astype(np.uint8),
+                    None, 0.5, 3, 15, 3, 5, 1.2, 0
+                )
+                
+                # Get coordinates within the patch that correspond to this label
+                label_mask_patch = source_mask[y_min:y_max, x_min:x_max]
+                patch_y_coords, patch_x_coords = np.where(label_mask_patch)
+                
+                if len(patch_y_coords) == 0:
+                    continue
+                    
+                # Apply flow displacement (OpenCV returns [dx, dy])
+                new_patch_x = patch_x_coords + flow[patch_y_coords, patch_x_coords, 0]
+                new_patch_y = patch_y_coords + flow[patch_y_coords, patch_x_coords, 1]
+                
+                # Convert back to full image coordinates
+                new_y_coords = new_patch_y + y_min
+                new_x_coords = new_patch_x + x_min
+                
+                # Clip to image bounds
+                new_y_coords = np.clip(np.round(new_y_coords).astype(int), 0, warped_labels.shape[0] - 1)
+                new_x_coords = np.clip(np.round(new_x_coords).astype(int), 0, warped_labels.shape[1] - 1)
+                
+                # Only set pixels that aren't already labeled
+                valid_pixels = warped_labels[new_y_coords, new_x_coords] == 0
+                warped_labels[new_y_coords[valid_pixels], new_x_coords[valid_pixels]] = label_id
+                
+            except Exception as e:
+                warnings.warn(f"Optical flow failed for label {label_id}: {e}")
+                # Fallback to direct copying for this label
+                warped_labels[source_mask] = label_id
+                
+        return warped_labels
 
     
     def apply_refinement_method(self, image: np.ndarray, labels: np.ndarray,

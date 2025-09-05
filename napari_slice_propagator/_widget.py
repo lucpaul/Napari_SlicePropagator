@@ -263,6 +263,22 @@ class SlicePropagatorWidget(QWidget):
         self.gc_group.setLayout(gc_layout)
         self.gc_group.setVisible(False)
         contour_layout.addRow(self.gc_group)
+
+        # Optical Flow parameters group
+        self.of_group = QGroupBox("Optical Flow Parameters")
+        of_layout = QFormLayout()
+
+        self.enable_optical_flow_check = QCheckBox("Enable optical flow warping")
+        self.enable_optical_flow_check.setChecked(True)
+        of_layout.addRow(self.enable_optical_flow_check)
+
+        self.of_window_size_spin = QSpinBox()
+        self.of_window_size_spin.setRange(5, 50)
+        self.of_window_size_spin.setValue(15)
+        of_layout.addRow("Window size:", self.of_window_size_spin)
+
+        self.of_group.setLayout(of_layout)
+        layout.addWidget(self.of_group)
         
         # Morphological operations group
         morph_group = QGroupBox("Morphological Operations")
@@ -354,6 +370,8 @@ class SlicePropagatorWidget(QWidget):
             self.current_labels_layer.events.data.connect(self._on_labels_changed)
         else:
             self.current_labels_layer = None
+
+        self._set_image_data_for_propagator() #This is new for optical flow step
     
     def _on_layer_added(self, event):
         """Handle new layer addition."""
@@ -419,6 +437,8 @@ class SlicePropagatorWidget(QWidget):
         # Check if source slice has annotations
         if not self.propagator.has_annotations(labels_data[from_slice]):
             return
+
+        self._set_image_data_for_propagator()
         
         # Use incremental propagation method
         self.monitoring_changes = True
@@ -465,55 +485,7 @@ class SlicePropagatorWidget(QWidget):
                     
         finally:
             self.monitoring_changes = False
-    # def _auto_propagate_incremental(self, from_slice: int, to_slice: int):
-    #     """
-    #     Automatically propagate new annotations using incremental propagation.
-    #     This allows adding labels to slices that already have annotations.
-    #     """
-    #     labels_data = self.current_labels_layer.data
-        
-    #     # Check if source slice has annotations
-    #     if not self.propagator.has_annotations(labels_data[from_slice]):
-    #         return
-        
-    #     # Use incremental propagation method
-    #     self.monitoring_changes = True
-    #     try:
-    #         updated_labels = self.propagator.incremental_propagate(
-    #             from_slice, to_slice, labels_data
-    #         )
 
-    #         # Apply refinement if auto-propagate with refinement is enabled
-    #         if self.auto_propagate_refined.isChecked() and self.current_image_layer is not None:
-    #             method = self.method_combo.currentText()
-    #             params = self.get_current_parameters()
-                
-    #             target_labels = updated_labels[to_slice]
-    #             refined_labels = self.propagator.apply_refinement_method(
-    #                 self.current_image_layer.data[to_slice], target_labels, method, params
-    #             )
-    #             updated_labels[to_slice] = refined_labels
-            
-    #         # Update the labels layer only if propagation actually happened
-    #         if not np.array_equal(updated_labels, labels_data):
-    #             self.current_labels_layer.data = updated_labels
-    #             self.current_labels_layer.refresh()
-                
-    #             # Count how many new labels were propagated
-    #             new_labels_on_target = set(np.unique(updated_labels[to_slice])) - set(np.unique(labels_data[to_slice]))
-    #             new_labels_on_target.discard(0)
-                
-    #             if new_labels_on_target:
-    #                 self.status_label.setText(
-    #                     f"Incrementally propagated {len(new_labels_on_target)} new label(s) from slice {from_slice} to {to_slice}"
-    #                 )
-    #             else:
-    #                 self.status_label.setText("No new labels to propagate")
-    #         else:
-    #             self.status_label.setText("No new labels to propagate")
-                
-    #     finally:
-    #         self.monitoring_changes = False
     
     def manual_propagate(self):
         """Manually propagate current slice to next slice."""
@@ -724,6 +696,13 @@ class SlicePropagatorWidget(QWidget):
             warnings.warn(f"Morphological operation failed: {e}")
         finally:
             self.monitoring_changes = False
+
+    def _set_image_data_for_propagator(self):
+        """Pass current image data to propagator for optical flow."""
+        if self.current_image_layer is not None:
+            self.propagator._current_image_data = self.current_image_layer.data
+        else:
+            self.propagator._current_image_data = None
     
     def get_current_parameters(self) -> dict:
         """Get current refinement parameters based on selected method."""
